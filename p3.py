@@ -82,48 +82,6 @@ def review_to_words(raw_review, stops):
     return " ".join(meaningful_words)
 
 
-def highlight_important_words(review, important_words, output_path):
-    """
-    Highlights the important words in the original review by wrapping them in HTML span tags.
-
-    Parameters:
-    - review: Original review text.
-    - important_words: List of words to highlight.
-    - output_path: File path to save the highlighted HTML.
-    """
-    # Parse the HTML content
-    soup = BeautifulSoup(review, "html.parser")
-
-    # Compile regex patterns for all important words
-    patterns = {word: re.compile(r'\b{}\b'.format(re.escape(word)), re.IGNORECASE) for word in important_words}
-
-    # Function to recursively traverse and highlight words in text nodes
-    def recursive_highlight(element):
-        for content in element.contents:
-            if isinstance(content, NavigableString):
-                new_content = str(content)
-                for word, pattern in patterns.items():
-                    # Replace matched words with highlighted span
-                    new_content = pattern.sub(
-                        lambda match: f"<span style='background-color: yellow;'>{match.group(0)}</span>",
-                        new_content
-                    )
-                # Replace the old text with the new highlighted text
-                if new_content != content:
-                    new_fragment = BeautifulSoup(new_content, "html.parser")
-                    content.replace_with(new_fragment)
-            elif content.name is not None:
-                # Recursively process child elements
-                recursive_highlight(content)
-
-    # Start the recursive highlighting from the root
-    recursive_highlight(soup)
-
-    # Save the highlighted review to an HTML file
-    with open(output_path, 'w', encoding='utf-8') as file:
-        file.write(str(soup))
-
-
 def interpret_model(model, vectorizer, test_data_features, test_reviews, y_test, DATA_DIR):
     """
     Interpret model predictions for 5 positive and 5 negative reviews using LIME.
@@ -230,7 +188,6 @@ def interpret_model(model, vectorizer, test_data_features, test_reviews, y_test,
 
             filename_html = f'review_{i+1}_{"positive" if label ==1 else "negative"}_highlighted.html'
             filepath_html = os.path.join(highlighted_dir, filename_html)
-            highlight_important_words(review_text, top_words, filepath_html)
 
             print(f"\nReview {i+1} - {'Positive' if label ==1 else 'Negative'} Sentiment")
             print(f"LIME explanation saved to {explanation_path}")
