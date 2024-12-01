@@ -295,19 +295,27 @@ def main():
         clean_train_reviews.append(review_to_words(train["review"][i], stops))
 
     print("\nCreating the bag of words...\n")
-    vectorizer = CountVectorizer(
-        analyzer="word",
-        tokenizer=None,
-        preprocessor=None,
-        stop_words=None,
-        max_features=5000,
-        ngram_range=(1, 4),
-        min_df=0.001,
-        max_df=0.5,
-        token_pattern=r"\b[\w+|']+\b"
-    )
+    vectorizer_path = os.path.join(split_dir, "vectorizer.pkl")
+    if os.path.exists(vectorizer_path):
+        print("Loading existing vectorizer...")
+        vectorizer = pd.read_pickle(vectorizer_path)
+        train_data_features = vectorizer.transform(clean_train_reviews)
+    else:
+        print("Creating and fitting new vectorizer...")
+        vectorizer = CountVectorizer(
+            analyzer="word",
+            tokenizer=None,
+            preprocessor=None, 
+            stop_words=None,
+            max_features=5000,
+            ngram_range=(1, 4),
+            min_df=0.001,
+            max_df=0.5,
+            token_pattern=r"\b[\w+|']+\b"
+        )
+        train_data_features = vectorizer.fit_transform(clean_train_reviews)
+        pd.to_pickle(vectorizer, vectorizer_path)
 
-    train_data_features = vectorizer.fit_transform(clean_train_reviews)
     train_data_features = train_data_features.toarray()
 
     vocab = vectorizer.get_feature_names_out()
@@ -319,8 +327,15 @@ def main():
     for tag, count in zip(vocab, dist):
         print(f"{count} {tag}")
 
-    print("\nTraining the logistic regression...\n")
-    logistic_model = train_logistic(train_data_features, train["sentiment"])
+    print("\ntraining the logistic regression...\n")
+    model_path = os.path.join(split_dir, "logistic_model.pkl")
+    if os.path.exists(model_path):
+        print("Loading existing logistic regression model...")
+        logistic_model = pd.read_pickle(model_path)
+    else:
+        print("Training new logistic regression model...")
+        logistic_model = train_logistic(train_data_features, train["sentiment"])
+        pd.to_pickle(logistic_model, model_path)
 
     clean_test_reviews = []
     num_test_reviews = len(test["review"])
