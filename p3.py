@@ -7,8 +7,11 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import argparse
+import platform
+import psutil
 
-from bs4 import BeautifulSoup, NavigableString
+from bs4 import BeautifulSoup
 from nltk.corpus import stopwords
 import nltk
 
@@ -20,6 +23,36 @@ from lime.lime_text import LimeTextExplainer
 
 # Ensure necessary NLTK data is downloaded
 nltk.download('stopwords')
+
+
+def get_hardware_info():
+    """
+    Retrieves and returns hardware information.
+    """
+    system = platform.system()
+    processor = platform.processor()
+    cpu_count = psutil.cpu_count(logical=False)
+    total_memory = psutil.virtual_memory().total / (1024 ** 3)  # Convert to GB
+
+    hardware_info = {
+        'System': system,
+        'Processor': processor,
+        'Physical Cores': cpu_count,
+        'Total Memory (GB)': round(total_memory, 2)
+    }
+
+    return hardware_info
+
+
+def print_hardware_info():
+    """
+    Prints hardware information.
+    """
+    hardware_info = get_hardware_info()
+    print("\n--- Hardware Information ---")
+    for key, value in hardware_info.items():
+        print(f"{key}: {value}")
+    print("----------------------------\n")
 
 
 def train_logistic(X_train, y_train):
@@ -82,14 +115,13 @@ def review_to_words(raw_review, stops):
     return " ".join(meaningful_words)
 
 
-def interpret_model(model, vectorizer, test_data_features, test_reviews, y_test, DATA_DIR):
+def interpret_model(model, vectorizer, test_reviews, y_test, DATA_DIR):
     """
     Interpret model predictions for 5 positive and 5 negative reviews using LIME.
 
     Parameters:
     - model: Trained model (LogisticRegression).
     - vectorizer: Fitted CountVectorizer.
-    - test_data_features: Feature matrix for test data.
     - test_reviews: Original test reviews.
     - y_test: True labels for test data.
     - DATA_DIR: Directory path to save interpretability outputs.
@@ -110,11 +142,7 @@ def interpret_model(model, vectorizer, test_data_features, test_reviews, y_test,
     selected_indices = np.concatenate([selected_positive, selected_negative])
 
     selected_reviews = test_reviews.iloc[selected_indices].reset_index(drop=True)
-    selected_features = test_data_features[selected_indices]
     selected_labels = y_test.iloc[selected_indices].reset_index(drop=True)
-
-    # Get feature names
-    feature_names = vectorizer.get_feature_names_out()
 
     # Create directory to save interpretability plots and highlighted reviews
     plots_dir = os.path.join(DATA_DIR, 'interpretability_plots')
@@ -126,6 +154,7 @@ def interpret_model(model, vectorizer, test_data_features, test_reviews, y_test,
     if isinstance(model, LogisticRegression):
         if hasattr(model, 'coef_'):
             coefficients = model.coef_[0]
+            feature_names = vectorizer.get_feature_names_out()
             coef_df = pd.DataFrame({
                 'feature': feature_names,
                 'coefficient': coefficients
@@ -148,71 +177,142 @@ def interpret_model(model, vectorizer, test_data_features, test_reviews, y_test,
             plt.close()
 
     # Local Interpretability using LIME
-    if isinstance(model, LogisticRegression):
-        lime_explainer = LimeTextExplainer(class_names=['Negative', 'Positive'], random_state=42)
+    lime_explainer = LimeTextExplainer(class_names=['Negative', 'Positive'], random_state=42)
 
-        for i in range(len(selected_reviews)):
-            review = selected_reviews.iloc[i]
-            label = selected_labels.iloc[i]
-            review_text = review  # Assuming 'review' contains the raw text
+    for i in range(len(selected_reviews)):
+        review = selected_reviews.iloc[i]
+        label = selected_labels.iloc[i]
+        review_text = review  # Assuming 'review' contains the raw text
 
-            def predict_proba(texts):
-                clean_texts = [review_to_words(text, set(stopwords.words("english"))) for text in texts]
-                features = vectorizer.transform(clean_texts)
-                return model.predict_proba(features)
+        def predict_proba(texts):
+            clean_texts = [review_to_words(text, set(stopwords.words("english"))) for text in texts]
+            features = vectorizer.transform(clean_texts)
+            return model.predict_proba(features)
 
-            explanation = lime_explainer.explain_instance(
-                review_text,
-                predict_proba,
-                num_features=10,
-                labels=(1,)
-            )
+        explanation = lime_explainer.explain_instance(
+            review_text,
+            predict_proba,
+            num_features=10,
+            labels=(1,)
+        )
 
-            explanation_html = explanation.as_html()
-            explanation_path = os.path.join(plots_dir, f'review_{i+1}_lime.html')
-            with open(explanation_path, 'w', encoding='utf-8') as f:
-                f.write(explanation_html)
+        # Save explanation as HTML
+        explanation_html = explanation.as_html()
+        explanation_path = os.path.join(plots_dir, f'review_{i+1}_lime.html')
+        with open(explanation_path, 'w', encoding='utf-8') as f:
+            f.write(explanation_html)
 
-            top_features = explanation.as_list(label=1)[:10]
-            top_words = [word for word, weight in top_features]
+        # Save top contributing words as TXT
+        top_features = explanation.as_list(label=1)[:10]
 
-            filename_txt = f'review_{i+1}_{"positive" if label ==1 else "negative"}_lime.txt'
-            filepath_txt = os.path.join(plots_dir, filename_txt)
+        filename_txt = f'review_{i+1}_{"positive" if label ==1 else "negative"}_lime.txt'
+        filepath_txt = os.path.join(plots_dir, filename_txt)
 
-            with open(filepath_txt, 'w') as f:
-                f.write(f"Review {i+1} - {'Positive' if label ==1 else 'Negative'} Sentiment\n")
-                f.write(f"Original review:\n{review_text}\n\n")
-                f.write("Top contributing words (LIME):\n")
-                for word, weight in top_features:
-                    f.write(f"{word}: {weight:.4f}\n")
+        with open(filepath_txt, 'w') as f:
+            f.write(f"Review {i+1} - {'Positive' if label ==1 else 'Negative'} Sentiment\n")
+            f.write(f"Original review:\n{review_text}\n\n")
+            f.write("Top contributing words (LIME):\n")
+            for word, weight in top_features:
+                f.write(f"{word}: {weight:.4f}\n")
 
-            filename_html = f'review_{i+1}_{"positive" if label ==1 else "negative"}_highlighted.html'
-            filepath_html = os.path.join(highlighted_dir, filename_html)
-
-            print(f"\nReview {i+1} - {'Positive' if label ==1 else 'Negative'} Sentiment")
-            print(f"LIME explanation saved to {explanation_path}")
-            print(f"Top contributing words saved to {filepath_txt}")
-            print(f"Highlighted review saved to {filepath_html}")
+        # Highlight the top words in the review and save as HTML
+        filename_html = f'review_{i+1}_{"positive" if label ==1 else "negative"}_highlighted.html'
+        filepath_html = os.path.join(highlighted_dir, filename_html)
+        with open(filepath_html, 'w', encoding='utf-8') as f:
+            highlighted_text = review_text
+            for word, weight in top_features:
+                highlighted_text = re.sub(f"\\b{re.escape(word)}\\b", f"<mark>{word}</mark>", highlighted_text, flags=re.IGNORECASE)
+            f.write(f"<html><body><p>{highlighted_text}</p></body></html>")
 
     print(f"\nInterpretability visualizations saved in the directory: {plots_dir}")
-    print(f"Highlighted reviews saved in the directory: {highlighted_dir}")
+    print(f"Highlighted reviews saved in the directory: {highlighted_dir}\n")
 
 
 def main():
     warnings.filterwarnings('ignore')
 
+    parser = argparse.ArgumentParser(description="Movie Review Sentiment Analysis")
+    parser.add_argument('--dev', action='store_true', help='Run in development mode with multiple splits')
+    args = parser.parse_args()
+
+    print_hardware_info()
+
     DATA_DIR = 'p3_data'
     num_splits = 5
 
-    for i in range(num_splits):
-        split_dir = os.path.join(DATA_DIR, f"split_{i+1}")
-        train_path = os.path.join(split_dir, "train.csv")
-        test_path = os.path.join(split_dir, "test.csv")
-        test_y_path = os.path.join(split_dir, "test_y.csv")
+    if args.dev:
+        print("Running in Development Mode...\n")
+        for i in range(num_splits):
+            split_dir = os.path.join(DATA_DIR, f"split_{i+1}")
+            print(f"Processing Split {i+1}...")
+            train = pd.read_csv(os.path.join(split_dir, "train.csv"))
+            test = pd.read_csv(os.path.join(split_dir, "test.csv"))
+            y_test = pd.read_csv(os.path.join(split_dir, "test_y.csv"))['sentiment']
 
-        train = pd.read_csv(train_path)
-        test = pd.read_csv(test_path)
-        y_test = pd.read_csv(test_y_path)['sentiment']
+            X_train = train.drop(columns=['id', 'sentiment', 'review'])
+            y_train = train['sentiment']
+            X_test = test.drop(columns=['id', 'review'])
+
+            model = train_logistic(X_train, y_train)
+            y_pred_proba = predict(model, X_test)
+
+            auc_score = roc_auc_score(y_test, y_pred_proba)
+            print(f"Split {i+1} AUC: {auc_score:.6f}")
+
+            submission = pd.DataFrame({
+                'id': test['id'],
+                'prob': y_pred_proba
+            })
+            submission.to_csv(os.path.join(split_dir, "mysubmission.csv"), index=False)
+            print(f"mysubmission.csv saved for Split {i+1}.\n")
+
+        # Interpretability Analysis for Split 1
+        print("Starting Interpretability Analysis for Split 1...\n")
+        split_dir = os.path.join(DATA_DIR, "split_1")
+        train = pd.read_csv(os.path.join(split_dir, "train.csv"))
+        test = pd.read_csv(os.path.join(split_dir, "test.csv"))
+        y_test = pd.read_csv(os.path.join(split_dir, "test_y.csv"))['sentiment']
+
+        stops = set(stopwords.words("english"))
+
+        # Clean and preprocess test reviews
+        print("Cleaning and preprocessing test reviews...")
+        clean_test_reviews = [review_to_words(r, stops) for r in test["review"]]
+
+        # Vectorization
+        print("Vectorizing text data...")
+        vectorizer = CountVectorizer(
+            analyzer="word",
+            tokenizer=None,
+            preprocessor=None,
+            stop_words=None,
+            max_features=5000,
+            ngram_range=(1, 4),
+            min_df=0.001,
+            max_df=0.5,
+            token_pattern=r"\b[\w+|']+\b"
+        )
+        vectorizer.fit(clean_test_reviews)
+        # Transform training data
+        train_data_features = vectorizer.transform([review_to_words(r, stops) for r in train["review"]]).toarray()
+        test_data_features = vectorizer.transform(clean_test_reviews).toarray()
+
+        # Train model
+        print("Training Logistic Regression model...")
+        model = train_logistic(train_data_features, train['sentiment'])
+
+        # Interpret model
+        interpret_model(
+            model=model,
+            vectorizer=vectorizer,
+            test_reviews=test['review'],
+            y_test=y_test,
+            DATA_DIR=split_dir
+        )
+    else:
+        print("Running in Submission Mode...\n")
+        train = pd.read_csv("train.csv")
+        test = pd.read_csv("test.csv")
 
         X_train = train.drop(columns=['id', 'sentiment', 'review'])
         y_train = train['sentiment']
@@ -221,109 +321,12 @@ def main():
         model = train_logistic(X_train, y_train)
         y_pred_proba = predict(model, X_test)
 
-        auc_baseline = roc_auc_score(y_test, y_pred_proba)
-        print(f"Baseline Logistic Regression AUC in split {i+1}: {auc_baseline:.3f}")
-
         submission = pd.DataFrame({
             'id': test['id'],
             'prob': y_pred_proba
         })
-        submission.to_csv(os.path.join(split_dir, "mysubmission.csv"), index=False)
-
-        test_auc_score = roc_auc_score(y_test, y_pred_proba)
-        print(f"Best AUC Score on Test Data in split {i+1}: {test_auc_score:.3f}")
-
-    split = 1
-    split_dir = os.path.join(DATA_DIR, f"split_{split}")
-    train_path = os.path.join(split_dir, "train.csv")
-    test_path = os.path.join(split_dir, "test.csv")
-
-    train = pd.read_csv(train_path)
-    test = pd.read_csv(test_path)
-
-    stops = set(stopwords.words("english"))
-
-    clean_train_reviews = []
-    num_train_reviews = train["review"].size
-    print("\nCleaning and parsing the training set movie reviews...\n")
-    for i in range(num_train_reviews):
-        if (i+1) % 1000 == 0:
-            print(f"Review {i+1} of {num_train_reviews}")
-        clean_train_reviews.append(review_to_words(train["review"][i], stops))
-
-    print("\nCreating the bag of words...\n")
-    vectorizer_path = os.path.join(split_dir, "vectorizer.pkl")
-    if os.path.exists(vectorizer_path):
-        print("Loading existing vectorizer...")
-        vectorizer = pd.read_pickle(vectorizer_path)
-        train_data_features = vectorizer.transform(clean_train_reviews)
-    else:
-        print("Creating and fitting new vectorizer...")
-        vectorizer = CountVectorizer(
-            analyzer="word",
-            tokenizer=None,
-            preprocessor=None, 
-            stop_words=None,
-            max_features=5000,
-            ngram_range=(1, 4),
-            min_df=0.001,
-            max_df=0.5,
-            token_pattern=r"\b[\w+|']+\b"
-        )
-        train_data_features = vectorizer.fit_transform(clean_train_reviews)
-        pd.to_pickle(vectorizer, vectorizer_path)
-
-    train_data_features = train_data_features.toarray()
-
-    vocab = vectorizer.get_feature_names_out()
-    print("\nVocabulary:")
-    print(vocab)
-
-    dist = np.sum(train_data_features, axis=0)
-    print("\nWord Counts:")
-    for tag, count in zip(vocab, dist):
-        print(f"{count} {tag}")
-
-    print("\ntraining the logistic regression...\n")
-    model_path = os.path.join(split_dir, "logistic_model.pkl")
-    if os.path.exists(model_path):
-        print("Loading existing logistic regression model...")
-        logistic_model = pd.read_pickle(model_path)
-    else:
-        print("Training new logistic regression model...")
-        logistic_model = train_logistic(train_data_features, train["sentiment"])
-        pd.to_pickle(logistic_model, model_path)
-
-    clean_test_reviews = []
-    num_test_reviews = len(test["review"])
-    print("\nCleaning and parsing the test set movie reviews...\n")
-    for i in range(num_test_reviews):
-        if (i+1) % 1000 == 0:
-            print(f"Review {i+1} of {num_test_reviews}")
-        clean_review = review_to_words(test["review"][i], stops)
-        clean_test_reviews.append(clean_review)
-
-    test_data_features = vectorizer.transform(clean_test_reviews)
-    test_data_features = test_data_features.toarray()
-
-    y_pred_logistic = predict(logistic_model, test_data_features)
-    submission_logistic = pd.DataFrame({
-        'id': test['id'],
-        'prob': y_pred_logistic
-    })
-    submission_logistic.to_csv(os.path.join(split_dir, "logistic_submission.csv"), index=False)
-    print(f"\nLogistic Regression predictions saved for split {split}.")
-
-    print("\nStarting interpretability analysis...\n")
-    y_test_split1 = pd.read_csv(os.path.join(split_dir, "test_y.csv"))['sentiment']
-    interpret_model(
-        model=logistic_model,
-        vectorizer=vectorizer,
-        test_data_features=test_data_features,
-        test_reviews=test['review'],
-        y_test=y_test_split1,
-        DATA_DIR=split_dir
-    )
+        submission.to_csv("mysubmission.csv", index=False)
+        print("mysubmission.csv has been saved in the root directory.\n")
 
 
 if __name__ == "__main__":
