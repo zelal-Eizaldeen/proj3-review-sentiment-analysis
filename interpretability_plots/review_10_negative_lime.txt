@@ -1,0 +1,15 @@
+Review 10 - Negative Sentiment
+Original review:
+THE PROTECTOR. You hear the name. You think, \ah, it's a crappy Hong Kong movie.\" Guess what - it's not Hong Kong. And yes, it is crappy. This amazingly stupid Jackie Chan film, ruined by us, yes us, the Americans (I'm boiling with anger, ooh, I think I'll jump out that window!), has Chan as a New York cop hunting down a gang, avenging the death of his buddy. Sounds cool...but it's not. Don't waste your money renting it. To prove he could make a better cop film, Chan made the amazing POLICE STORY (1985)."
+
+Top contributing words (LIME):
+crappy: -0.2012
+waste: -0.1332
+make: -0.1083
+Chan: 0.1031
+yes: -0.0959
+cop: -0.0916
+better: -0.0869
+made: 0.0830
+gang: -0.0749
+Guess: 0.0681

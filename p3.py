@@ -10,6 +10,8 @@ import seaborn as sns
 import argparse
 import platform
 import psutil
+import time
+import pickle
 
 from bs4 import BeautifulSoup
 from nltk.corpus import stopwords
@@ -123,13 +125,18 @@ def interpret_model(model, vectorizer, test_reviews, y_test, DATA_DIR):
     - model: Trained model (LogisticRegression).
     - vectorizer: Fitted CountVectorizer.
     - test_reviews: Original test reviews.
-    - y_test: True labels for test data.
+    - y_test: Model's predictions for test data.
     - DATA_DIR: Directory path to save interpretability outputs.
     """
-    # Select 5 positive and 5 negative reviews
+    # Get model predictions to identify positive/negative examples
+    test_features = vectorizer.transform([review_to_words(review, set(stopwords.words("english"))) 
+                                        for review in test_reviews]).toarray()
+    y_pred = model.predict(test_features)
+
+    # Select 5 positive and 5 negative reviews based on model predictions
     np.random.seed(42)  # For reproducibility
-    positive_indices = np.where(y_test == 1)[0]
-    negative_indices = np.where(y_test == 0)[0]
+    positive_indices = np.where(y_pred == 1)[0]
+    negative_indices = np.where(y_pred == 0)[0]
 
     num_positive = min(5, len(positive_indices))
     num_negative = min(5, len(negative_indices))
@@ -142,7 +149,7 @@ def interpret_model(model, vectorizer, test_reviews, y_test, DATA_DIR):
     selected_indices = np.concatenate([selected_positive, selected_negative])
 
     selected_reviews = test_reviews.iloc[selected_indices].reset_index(drop=True)
-    selected_labels = y_test.iloc[selected_indices].reset_index(drop=True)
+    selected_labels = y_pred[selected_indices]
 
     # Create directory to save interpretability plots and highlighted reviews
     plots_dir = os.path.join(DATA_DIR, 'interpretability_plots')
@@ -181,7 +188,7 @@ def interpret_model(model, vectorizer, test_reviews, y_test, DATA_DIR):
 
     for i in range(len(selected_reviews)):
         review = selected_reviews.iloc[i]
-        label = selected_labels.iloc[i]
+        label = selected_labels[i]
         review_text = review  # Assuming 'review' contains the raw text
 
         def predict_proba(texts):
@@ -228,11 +235,13 @@ def interpret_model(model, vectorizer, test_reviews, y_test, DATA_DIR):
     print(f"Highlighted reviews saved in the directory: {highlighted_dir}\n")
 
 
+
 def main():
     warnings.filterwarnings('ignore')
 
     parser = argparse.ArgumentParser(description="Movie Review Sentiment Analysis")
     parser.add_argument('--dev', action='store_true', help='Run in development mode with multiple splits')
+    parser.add_argument('--interp', action='store_true', help='Run model interpretation')
     args = parser.parse_args()
 
     print_hardware_info()
@@ -242,7 +251,9 @@ def main():
 
     if args.dev:
         print("Running in Development Mode...\n")
+        total_time = 0
         for i in range(num_splits):
+            split_start = time.time()
             split_dir = os.path.join(DATA_DIR, f"split_{i+1}")
             print(f"Processing Split {i+1}...")
             train = pd.read_csv(os.path.join(split_dir, "train.csv"))
@@ -253,11 +264,30 @@ def main():
             y_train = train['sentiment']
             X_test = test.drop(columns=['id', 'review'])
 
-            model = train_logistic(X_train, y_train)
+            model_path = os.path.join(split_dir, "model.pkl")
+            if os.path.exists(model_path):
+                print("Loading existing Logistic Regression model...")
+                with open(model_path, 'rb') as f:
+                    model = pickle.load(f)
+                print("Model loaded successfully")
+            else:
+                print("Training new Logistic Regression model...")
+                train_start = time.time()
+                model = train_logistic(X_train, y_train)
+                train_time = time.time() - train_start
+                print(f"Training time: {train_time:.2f} seconds")
+                # Save the model
+                with open(model_path, 'wb') as f:
+                    pickle.dump(model, f)
+                print("Model saved successfully")
+            
             y_pred_proba = predict(model, X_test)
 
             auc_score = roc_auc_score(y_test, y_pred_proba)
+            split_time = time.time() - split_start
+            total_time += split_time
             print(f"Split {i+1} AUC: {auc_score:.6f}")
+            print(f"Split {i+1} execution time: {split_time:.2f} seconds\n")
 
             submission = pd.DataFrame({
                 'id': test['id'],
@@ -265,6 +295,9 @@ def main():
             })
             submission.to_csv(os.path.join(split_dir, "mysubmission.csv"), index=False)
             print(f"mysubmission.csv saved for Split {i+1}.\n")
+
+        print(f"Total execution time for all splits: {total_time:.2f} seconds")
+        print(f"Average execution time per split: {total_time/num_splits:.2f} seconds\n")
 
         # Interpretability Analysis for Split 1
         print("Starting Interpretability Analysis for Split 1...\n")
@@ -299,7 +332,19 @@ def main():
 
         # Train model
         print("Training Logistic Regression model...")
-        model = train_logistic(train_data_features, train['sentiment'])
+        model_path = os.path.join(split_dir, "model_interp.pkl")
+        if os.path.exists(model_path):
+            print("Loading existing model...")
+            with open(model_path, 'rb') as f:
+                model = pickle.load(f)
+        else:
+            print("Training new model...")
+            start_time = time.time()
+            model = train_logistic(train_data_features, train['sentiment'])
+            train_time = time.time() - start_time
+            print(f"Model training time: {train_time:.2f} seconds")
+            with open(model_path, 'wb') as f:
+                pickle.dump(model, f)
 
         # Interpret model
         interpret_model(
@@ -314,19 +359,69 @@ def main():
         train = pd.read_csv("train.csv")
         test = pd.read_csv("test.csv")
 
-        X_train = train.drop(columns=['id', 'sentiment', 'review'])
-        y_train = train['sentiment']
-        X_test = test.drop(columns=['id', 'review'])
+        # Preprocess text data
+        stops = set(stopwords.words("english"))
+        print("Cleaning and preprocessing reviews...")
+        clean_train_reviews = [review_to_words(r, stops) for r in train["review"]]
+        clean_test_reviews = [review_to_words(r, stops) for r in test["review"]]
 
-        model = train_logistic(X_train, y_train)
-        y_pred_proba = predict(model, X_test)
+        # Vectorize text data
+        print("Vectorizing text data...")
+        vectorizer = CountVectorizer(
+            analyzer="word",
+            tokenizer=None,
+            preprocessor=None,
+            stop_words=None,
+            max_features=5000,
+            ngram_range=(1, 4),
+            min_df=0.001,
+            max_df=0.5,
+            token_pattern=r"\b[\w+|']+\b"
+        )
+        vectorizer.fit(clean_train_reviews + clean_test_reviews)
+        train_data_features = vectorizer.transform(clean_train_reviews).toarray()
+        test_data_features = vectorizer.transform(clean_test_reviews).toarray()
 
+        # Train or load model based on interp flag
+        if args.interp:
+            model_path = os.path.join(".", "model_interp.pkl")
+        else:
+            model_path = os.path.join(".", "model.pkl")
+
+        if os.path.exists(model_path):
+            print("Loading existing model...")
+            with open(model_path, 'rb') as f:
+                model = pickle.load(f)
+        else:
+            print("Training new model...")
+            start_time = time.time()
+            model = train_logistic(train_data_features, train['sentiment'])
+            train_time = time.time() - start_time
+            print(f"Model training time: {train_time:.2f} seconds")
+            with open(model_path, 'wb') as f:
+                pickle.dump(model, f)
+
+        # Generate predictions
+        y_pred_proba = predict(model, test_data_features)
+
+        # Save submission file
         submission = pd.DataFrame({
             'id': test['id'],
             'prob': y_pred_proba
         })
         submission.to_csv("mysubmission.csv", index=False)
         print("mysubmission.csv has been saved in the root directory.\n")
+
+        # Run interpretation if flag is set
+        if args.interp:
+            interpret_model(
+                model=model,
+                vectorizer=vectorizer,
+                test_reviews=test['review'],
+                y_test=None,
+                DATA_DIR="."
+            )
+
 
 
 if __name__ == "__main__":
