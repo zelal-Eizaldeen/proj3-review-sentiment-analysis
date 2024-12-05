@@ -1,4 +1,4 @@
-# p3.py
+# mymain.py
 
 import re
 import os
