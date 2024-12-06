@@ -452,10 +452,6 @@ def main():
             model = train_logistic(X_train, y_train)
             train_time = time.time() - train_start
             print(f"Training time: {train_time:.2f} seconds")
-            # Save the model
-            with open(model_path, 'wb') as f:
-                pickle.dump(model, f)
-            print("Model saved successfully")
             
             y_pred_proba = predict(model, X_test)
 
