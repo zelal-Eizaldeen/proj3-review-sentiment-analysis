@@ -441,21 +441,21 @@ def main():
 
             
             try:
-                model_path = os.path.join(split_dir, "model.pkl")
+                model_path = os.path.join('simple is better', "model.pkl")
                 # print("Loading existing Logistic Regression model...")
                 # with open(model_path, 'rb') as f:
                     # model = pickle.load(f)
                 # print("Model loaded successfully")
             except:
                 print("Training new Logistic Regression model...")
-                train_start = time.time()
-                model = train_logistic(X_train, y_train)
-                train_time = time.time() - train_start
-                print(f"Training time: {train_time:.2f} seconds")
-                # Save the model
-                with open(model_path, 'wb') as f:
-                    pickle.dump(model, f)
-                print("Model saved successfully")
+            train_start = time.time()
+            model = train_logistic(X_train, y_train)
+            train_time = time.time() - train_start
+            print(f"Training time: {train_time:.2f} seconds")
+            # Save the model
+            with open(model_path, 'wb') as f:
+                pickle.dump(model, f)
+            print("Model saved successfully")
             
             y_pred_proba = predict(model, X_test)
 
