@@ -354,10 +354,13 @@ def main():
             y_test=y_test,
             DATA_DIR=split_dir
         )
-    else:
+    elif args.interp:
         print("Running in Submission Mode...\n")
-        train = pd.read_csv("train.csv")
-        test = pd.read_csv("test.csv")
+        split_dir = os.path.join(DATA_DIR, "split_1")
+        #train = pd.read_csv(os.path.join(split_dir, "train.csv"))
+        #test = pd.read_csv(os.path.join(split_dir, "test.csv"))
+        train = pd.read_csv((os.getcwd()+'/p3_data/split_1/train.csv').replace("\\", "/"))
+        test = pd.read_csv((os.getcwd()+'/p3_data/split_1/test.csv').replace("\\", "/"))
 
         # Preprocess text data
         stops = set(stopwords.words("english"))
@@ -421,6 +424,53 @@ def main():
                 y_test=None,
                 DATA_DIR="."
             )
+    else:
+        print("Running in plain Mode...\n")
+        total_time = 0
+        for i in range(0,1):
+            split_start = time.time()
+            split_dir = ''
+            #print(f"Processing Split {i+1}...")
+            train = pd.read_csv('train.csv')
+            test = pd.read_csv('test.csv')
+            #y_test = pd.read_csv(os.path.join(split_dir, "test_y.csv"))['sentiment']
+
+            X_train = train.drop(columns=['id', 'sentiment', 'review'])
+            y_train = train['sentiment']
+            X_test = test.drop(columns=['id', 'review'])
+
+            
+            try:
+                model_path = os.path.join(split_dir, "model.pkl")
+                # print("Loading existing Logistic Regression model...")
+                # with open(model_path, 'rb') as f:
+                    # model = pickle.load(f)
+                # print("Model loaded successfully")
+            except:
+                print("Training new Logistic Regression model...")
+                train_start = time.time()
+                model = train_logistic(X_train, y_train)
+                train_time = time.time() - train_start
+                print(f"Training time: {train_time:.2f} seconds")
+                # Save the model
+                with open(model_path, 'wb') as f:
+                    pickle.dump(model, f)
+                print("Model saved successfully")
+            
+            y_pred_proba = predict(model, X_test)
+
+            #auc_score = roc_auc_score(y_test, y_pred_proba)
+            split_time = time.time() - split_start
+            total_time += split_time
+            #print(f"Split {i+1} AUC: {auc_score:.6f}")
+            print(f"execution time: {split_time:.2f} seconds\n")
+
+            submission = pd.DataFrame({
+                'id': test['id'],
+                'prob': y_pred_proba
+            })
+            submission.to_csv("mysubmission.csv", index=False)
+            print(f"mysubmission.csv saved.\n")
 
 
 
